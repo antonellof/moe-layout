@@ -1,0 +1,6 @@
+{
+  "num_layers": 16, "hidden": 2048, "ffn_hidden": 8192, "num_experts": 32, "moe_ffn_hidden": 1024,
+  "topk": 8, "heads": 32, "query_groups": 4, "kv_channels": 64, "vocab": 128256,
+  "seq_length": 4096, "micro_batch": 1, "global_batch": 32, "mtp_layers": 1,
+  "tied_embeddings": true, "full_recompute": true, "dp": 1, "distributed_optimizer": true
+}

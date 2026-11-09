@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moe-layout"
+version = "0.1.0"
+description = "Measured pipeline-layout planner and sizer for Megatron-LM MoE models with MTP"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+moe-layout = "moe_layout.__main__:main"
+
+[tool.setuptools]
+packages = ["moe_layout"]

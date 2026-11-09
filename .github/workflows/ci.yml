@@ -1,0 +1,31 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: syntax
+        run: |
+          python -m compileall -q moe_layout tests
+          bash -n jobs/run_layouts.sh
+          bash -n jobs/job_entry.sh
+      - name: no em dash characters
+        run: |
+          python - <<'PY'
+          import pathlib, sys
+          bad = [str(p) for p in pathlib.Path(".").rglob("*")
+                 if p.is_file() and ".git" not in p.parts
+                 and chr(0x2014) in p.read_text(errors="ignore")]
+          print("\n".join(bad))
+          sys.exit(1 if bad else 0)
+          PY
+      - name: unit tests
+        run: python -m unittest discover -s tests -v
+      - name: CLI smoke
+        run: |
+          python -m moe_layout size configs/handbook_7b_a1b.json
+          python -m moe_layout plan configs/proxy_a100x4_pp4_mtp1.json --pp 4 --tflops 150 --hbm-gb 80 --top 3
