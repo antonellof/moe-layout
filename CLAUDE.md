@@ -5,7 +5,7 @@ models with MTP. Successor of the moe-copilot validation
 (https://github.com/antonellof/moe-copilot, see its PLAN.md and RESULTS.md).
 Megatron pinned at d6316eb45bf1bfbb6f1f848c0b56e55166564d80.
 
-## Current phase: stages A and B done (about $5.80 of $30); stage C optional, needs the user's OK
+## Current phase: stages A, B, C done (about $16 of $30); results in README and results/
 
 ## Budget and rules (from the user)
 - Total GPU budget for stages A, B, C: $30. Ask before each paid stage, with the cost.
@@ -44,6 +44,15 @@ Megatron pinned at d6316eb45bf1bfbb6f1f848c0b56e55166564d80.
 - Node-to-node: the same default layout ran 2 percent slower on the stage B node.
 - Memory: max allocated = weights + optimizer state + 10.3 bytes per logit per head
   (L, m) + 0.13 GB; 2.8 percent mean error over 40 stages.
+
+## Verified on 8x H200 (stage C stageC-20261109T120517Z)
+- Handbook scale (64 experts, EP2, DP2, PP4, MBS4, GBS128, MTP1) trains at the pin with
+  custom layouts. Ranks 2k, 2k+1 form stage k (tp-cp-ep-dp-pp order).
+- Closed loop (plan:1 in place) picked Et*5|t*6|t*5|mL: 3.80 s vs default 5.28 s
+  (1.39x) and count-based 4.27 s (1.12x); prediction error max 2.7 percent on KPI runs.
+- Unit cost ratios: L 3.62 t, m 1.43 t, E 0.26 t (A100: 4.0, 1.44, 0.52).
+- Memory model over-predicts the mL stage at MBS4 (52 vs 38 GB); logit bytes were
+  calibrated at MBS1.
 
 ## HF Jobs facts (from moe-copilot)
 - Stock nvcr.io image pulls directly; jobs need pre-paid credits (402 otherwise).

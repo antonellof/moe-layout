@@ -11,11 +11,15 @@ measures what each part of the model really costs, simulates Megatron's pipeline
 schedule for every split Megatron accepts, and prints the layout string with the
 lowest predicted step time, plus the memory each GPU will need.
 
-**Result so far** (4x A100, the handbook's 7B-A1B recipe adapted to 4 pipeline stages
-with one MTP layer): picked from two 20-iteration profiling runs, the planner's layout
-ran **1.54x faster than Megatron's default split** and **1.26x faster than the
-count-based auto layout**. It was within 0.5 percent of the best layout measured, for
-about $6 of GPU time in total. Details and caveats are in [Status](#status).
+**Results.** The planner picks its layout from two 20-iteration profiling runs on a
+4-stage pipeline with one MTP layer. Its layout ran:
+- on 8x H200 at the handbook's scale (64 experts, expert parallelism 2): **1.39x faster
+  than Megatron's default split** and **1.12x faster than the count-based auto layout**,
+  with step time predicted within 2.7 percent;
+- on a 4x A100 proxy: 1.54x and 1.26x, within 0.5 percent of the best of 6 measured
+  layouts.
+
+About $16 of GPU time in total. Details and caveats are in [Status](#status).
 
 It also works as a **sizer**: parameters, FLOPs and memory per layer type, from a
 model config or a Megatron command line.
@@ -154,7 +158,7 @@ Checked on 2026-11-09. Details and sources are in
 | 0 | Planner, cost model, 1F1B simulator, sizer, Megatron log parsers, tests (CPU) | done |
 | A | 4x A100: does MTP with PP train at the pin; default vs count-based; 2 profiling runs | **passed** ($2.50) |
 | B | 4x A100: planner's picks measured, prediction error, best of N | **passed on speed, partial on prediction** ($3.30) |
-| C | 8x H200: handbook scale with expert parallelism (about $13) | optional, needs approval |
+| C | 8x H200: handbook scale with expert parallelism, closed loop in one job | **passed** (about $10) |
 
 KPI (stage B): measured step time of the planner's layout against Megatron's default
 split and the count-based rule. Pass: at least 10 percent faster than count-based,
@@ -216,6 +220,45 @@ allocated" with 2.8 percent mean error (max 13.7 percent, on the loss-only stage
 the standalone-MTP layouts).
 
 Spend: stage A $2.50, stage B $3.30.
+
+### Stage C: handbook scale on 8x H200 (run tag `stageC-20261109T120517Z`)
+
+The handbook's 7B-A1B with 64 experts, expert parallelism 2, data parallel 2, PP4,
+micro-batch 4, global batch 128, one MTP layer, 15 iterations (median of 5 to 15).
+`configs/handbook_h200x8_pp4_ep2_mtp1.json`. One job ran everything in sequence:
+1. the two profiling layouts;
+2. the planner, on its own fit of those runs (`plan:1`);
+3. its pick, then the two baselines, on the same node.
+
+The fixed overhead was recalibrated on the two baselines only, so the pick's
+prediction is out of sample.
+
+| Layout | Role | Measured step | Predicted | Error |
+| --- | --- | --- | --- | --- |
+| `Et*5\|t*6\|t*5\|mL` | **planner's pick (closed loop)** | **3.80 s** | 3.70 s | -2.7% |
+| `Et*4\|t*5\|t*5\|t*2mL` | count-based rule | 4.27 s | 4.28 s | +0.3% |
+| default | Megatron's own split | 5.28 s | 5.27 s | -0.2% |
+| `Et*4\|t*4\|t*4\|t*4mL` | profiling 1, with timers | 5.37 s | 5.27 s | -1.8% |
+| `Et*7\|t*5\|t*4m\|L` | profiling 2, with timers | 4.28 s | 4.18 s | -2.4% |
+
+| KPI | Target | Result |
+| --- | --- | --- |
+| speedup vs Megatron default (same node) | none | **1.39x** |
+| speedup vs count-based rule (same node) | at least 1.10x | **1.12x**, pass |
+| prediction error, KPI runs | at most 5% | **max 2.7%**, pass |
+| gap to the best measured layout | at most 2% | the pick was the fastest of the 3 KPI layouts; only stage B measured a wider set |
+
+Findings:
+- **The same pick on both GPU types.** On H200 the planner chose the same layout it
+  chose on A100. The fitted unit costs also transfer as ratios: loss 3.6x a decoder
+  layer (4.0 on A100), MTP 1.43x (1.44), embedding 0.26x (0.52).
+- **The gain over count-based is smaller here** (1.12x against 1.26x on A100): with
+  micro-batch 4 and expert parallelism the decoder layers are relatively heavier.
+- **Memory is conservative at micro-batch 4.** The sizer predicted 52 GB for the pick's
+  `mL` stage against 38 GB measured. The logit-memory term was calibrated at
+  micro-batch 1. Decoder stages were within about 10 percent.
+
+Spend: about $10 (14.4 min of h200x8).
 
 ### Before measuring: the FLOP-only prior
 

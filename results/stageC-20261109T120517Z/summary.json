@@ -1,0 +1,146 @@
+{
+  "runs": [
+    {
+      "run": "01_Etx4-tx4-tx4-tx4mL_prof",
+      "layout": "Et*4|t*4|t*4|t*4mL",
+      "profiling": true,
+      "failed": false,
+      "wall_s": 195,
+      "iters_measured": 11,
+      "step_ms_median": 5365.7,
+      "lm_loss_last": 7.981814,
+      "max_alloc_gb": {
+        "4": 23.543349609375,
+        "6": 52.3,
+        "0": 23.543349609375,
+        "2": 23.543349609375
+      },
+      "predicted_step_ms": 5267.29426311446,
+      "predicted_mem_gb": [
+        23.068851327999997,
+        19.916831872,
+        19.916831872,
+        71.40403018239999
+      ],
+      "prediction_error": -0.01833977614953131
+    },
+    {
+      "run": "02_Etx7-tx5-tx4m-L_prof",
+      "layout": "Et*7|t*5|t*4m|L",
+      "profiling": true,
+      "failed": false,
+      "wall_s": 131,
+      "iters_measured": 11,
+      "step_ms_median": 4284.7,
+      "lm_loss_last": 7.904516,
+      "max_alloc_gb": {
+        "4": 27.705712890625,
+        "2": 24.60212890625,
+        "0": 34.468779296875,
+        "6": 31.45109375
+      },
+      "predicted_step_ms": 4182.766531686214,
+      "predicted_mem_gb": [
+        37.908975232,
+        24.863539839999998,
+        46.6081192192,
+        24.9259109632
+      ],
+      "prediction_error": -0.023790106265032758
+    },
+    {
+      "run": "03_Etx5-tx6-tx5-mL_plan1",
+      "layout": "Et*5|t*6|t*5|mL",
+      "profiling": false,
+      "failed": false,
+      "wall_s": 120,
+      "iters_measured": 11,
+      "step_ms_median": 3799.9,
+      "lm_loss_last": 7.883507,
+      "max_alloc_gb": {
+        "2": 28.336337890625,
+        "6": 38.0985546875,
+        "0": 27.85564453125,
+        "4": 23.484755859375
+      },
+      "predicted_step_ms": 3698.5546276423156,
+      "predicted_mem_gb": [
+        28.015559296,
+        29.810247808,
+        24.863539839999998,
+        51.617198310400006
+      ],
+      "prediction_error": -0.02667053668719821
+    },
+    {
+      "run": "04_default",
+      "layout": "default",
+      "profiling": false,
+      "failed": false,
+      "wall_s": 142,
+      "iters_measured": 11,
+      "step_ms_median": 5278.9,
+      "lm_loss_last": 7.978296,
+      "max_alloc_gb": {
+        "4": 23.484755859375,
+        "0": 23.484755859375,
+        "2": 23.484755859375,
+        "6": 52.3
+      },
+      "predicted_step_ms": 5267.29426311446,
+      "predicted_mem_gb": [
+        23.068851327999997,
+        19.916831872,
+        19.916831872,
+        71.40403018239999
+      ],
+      "prediction_error": -0.002198514252124487
+    },
+    {
+      "run": "05_Etx4-tx5-tx5-tx2mL",
+      "layout": "Et*4|t*5|t*5|t*2mL",
+      "profiling": false,
+      "failed": false,
+      "wall_s": 129,
+      "iters_measured": 11,
+      "step_ms_median": 4267.2,
+      "lm_loss_last": 7.935311,
+      "max_alloc_gb": {
+        "2": 24.6713671875,
+        "6": 45.199326171875,
+        "0": 23.484755859375,
+        "4": 23.67515625
+      },
+      "predicted_step_ms": 4278.80573688554,
+      "predicted_mem_gb": [
+        23.068851327999997,
+        24.863539839999998,
+        24.863539839999998,
+        61.5106142464
+      ],
+      "prediction_error": 0.002719754613221774
+    }
+  ],
+  "kpi_ranking": [
+    [
+      "Et*5|t*6|t*5|mL",
+      3799.9
+    ],
+    [
+      "Et*4|t*5|t*5|t*2mL",
+      4267.2
+    ],
+    [
+      "default",
+      5278.9
+    ]
+  ],
+  "best_measured": {
+    "layout": "Et*5|t*6|t*5|mL",
+    "step_ms": 3799.9
+  },
+  "best_vs_default_speedup": 1.3892207689676044,
+  "best_vs_count_based_speedup": 1.1229769204452749,
+  "prediction_abs_error_mean": 0.010529601850848157,
+  "prediction_abs_error_max": 0.02667053668719821
+}
