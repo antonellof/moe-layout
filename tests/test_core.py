@@ -141,6 +141,22 @@ class PlanTest(unittest.TestCase):
         self.assertGreater(res["baselines"]["megatron_default"]["speedup_of_best"], 1.2)
         self.assertGreater(res["baselines"]["count_based"]["speedup_of_best"], 1.05)
 
+    def test_caution_flags(self):
+        s = score(PROXY, TRUTH, L.parse("Et*5|t*6|t*5m|L"), 4)
+        self.assertTrue(s["mtp_standalone"])
+        self.assertFalse(score(PROXY, TRUTH, L.parse("Et*5|t*6|t*5|mL"), 4)["mtp_standalone"])
+        res = plan(PROXY, TRUTH, 4, exclude_standalone_mtp=True, top=50)
+        self.assertTrue(all(not c["mtp_standalone"] for c in res["top"]))
+
+    def test_memory_calibration_matches_stage_measurements(self):
+        # measured 'max allocated' (GB) in stage B, 4x A100, planner pick Et*5|t*6|t*5|mL
+        measured = [24.5, 22.4, 18.8, 20.0]
+        st = L.parse("Et*5|t*6|t*5|mL")
+        first = [0, 5, 11, 16]
+        for i, (s, f) in enumerate(zip(st, first)):
+            pred = PROXY.stage_memory_gb(s, i, 4, first_layer=f)
+            self.assertLess(abs(pred - measured[i]) / measured[i], 0.08, msg=f"stage {i}")
+
     def test_memory_filter(self):
         res = plan(PROXY, TRUTH, 4, hbm_gb=21)
         self.assertTrue(all(max(c["stage_mem_gb"]) <= 21 for c in res["top"]))

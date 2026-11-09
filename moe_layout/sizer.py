@@ -145,23 +145,29 @@ class ModelConfig:
                 li += 1
         return n
 
+    # Calibrated on 40 measured stages (moe-layout stage A and B, 4x A100, BF16, full
+    # recompute, micro-batch 1): Megatron's "max allocated" = weights and optimizer
+    # state + about 10.3 bytes per logit per output head (L and m) + 0.13 GB.
+    # Mean error 2.8 percent, max 13.7 percent. Activations under full recompute at
+    # micro-batch 1 were too small to fit separately.
+    LOGIT_BYTES = 10.3
+    OVERHEAD_GB = 0.13
+
     def stage_memory_gb(self, stage: list[str], stage_idx: int, pp: int, first_layer: int = 0,
-                        act_scale: float = 1.0, overhead_gb: float = 4.0) -> float:
-        """Estimated peak memory of one pipeline stage (1F1B, VPP 1)."""
+                        act_scale: float = 1.0, overhead_gb: float | None = None) -> float:
+        """Estimated peak 'max allocated' of one pipeline stage (1F1B, VPP 1), in GB."""
         params = self.stage_params(stage, first_layer)
         opt_shard = self.dp if self.distributed_optimizer else 1
         static = params * (2 + 4 + 12 / opt_shard)  # bf16 param, fp32 grad, fp32 master + Adam
         in_flight = min(pp - stage_idx, max(1, self.global_batch // (self.micro_batch * self.dp)))
         tok = self.seq_length * self.micro_batch
         n_layers = sum(1 for u in stage if u in "tm")
-        if self.full_recompute:
-            stored = n_layers * tok * self.hidden * 2 * in_flight
-            work = (tok * self.hidden * 2 * 24 + tok * self.topk * self.moe_ffn_hidden * 2 * 6) if n_layers else 0
-        else:
-            stored = n_layers * tok * self.hidden * 2 * 34 * in_flight
-            work = 0
-        logits = tok * self.vocab * 4 * (stage.count("L") + stage.count("m")) * 2
-        return (static + act_scale * (stored + work) + logits) / 1e9 + overhead_gb
+        # stored layer inputs under full recompute; full activations otherwise (rough, uncalibrated)
+        per_layer = tok * self.hidden * 2 * (1 if self.full_recompute else 34)
+        stored = n_layers * per_layer * in_flight if not self.full_recompute else 0.0
+        logits = tok * self.vocab * self.LOGIT_BYTES * (stage.count("L") + stage.count("m"))
+        oh = self.OVERHEAD_GB if overhead_gb is None else overhead_gb
+        return (static + act_scale * stored + logits) / 1e9 + oh
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2)

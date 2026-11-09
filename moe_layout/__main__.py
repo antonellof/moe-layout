@@ -65,6 +65,8 @@ def main(argv=None):
     pl.add_argument("--tflops", type=float)
     pl.add_argument("--hbm-gb", type=float)
     pl.add_argument("--top", type=int, default=5)
+    pl.add_argument("--exclude-standalone-mtp", action="store_true",
+                    help="skip layouts with MTP on a stage without the loss (under-predicted in stage B)")
     sc = common(sub.add_parser("score", help="predict one layout"))
     sc.add_argument("--costs")
     sc.add_argument("--tflops", type=float)
@@ -106,7 +108,8 @@ def main(argv=None):
         open(a.out, "w").write(model.to_json())
         out = {"written": a.out, "fwd": model.fwd, "bwd": model.bwd, "report": model.fit_report}
     elif a.cmd == "plan":
-        out = plan(cfg, _cost(a, cfg), a.pp, hbm_gb=a.hbm_gb, top=a.top)
+        out = plan(cfg, _cost(a, cfg), a.pp, hbm_gb=a.hbm_gb, top=a.top,
+                   exclude_standalone_mtp=a.exclude_standalone_mtp)
     elif a.cmd == "score":
         st = L.parse(a.layout)
         L.validate(st, a.pp, cfg.num_layers, cfg.mtp_layers)

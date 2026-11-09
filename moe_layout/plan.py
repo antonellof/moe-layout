@@ -20,7 +20,14 @@ def score(cfg: ModelConfig, cost: CostModel, stages: list[list[str]], pp: int,
     mem = [cfg.stage_memory_gb(st, i, pp, first_layer=f, act_scale=act_scale)
            for i, (st, f) in enumerate(zip(stages, first))]
     step = sim["makespan_ms"] + cost.overhead_for(max(params))
+    tot = [f + b for f, b in zip(fwd, bwd)]
+    # Caution flags from stage B (4x A100): layouts with MTP on a stage without the loss
+    # ran 12 percent slower than predicted, and a layout with two equally slow stages
+    # 6 percent slower. Single-bottleneck, MTP-with-loss layouts were within 4 percent.
+    mtp_standalone = any("m" in st and "L" not in st for st in stages)
+    critical = sum(1 for t in tot if t >= 0.97 * max(tot))
     return {"layout": L.to_string(stages), "step_ms": step, "fb_ms": sim["makespan_ms"],
+            "mtp_standalone": mtp_standalone, "critical_stages": critical,
             "stage_fwd_ms": list(fwd), "stage_bwd_ms": list(bwd),
             "bottleneck_stage": sim["bottleneck_stage"], "idle_frac": sim["idle_frac"],
             "stage_params_b": [p / 1e9 for p in params], "stage_mem_gb": mem,
@@ -28,20 +35,20 @@ def score(cfg: ModelConfig, cost: CostModel, stages: list[list[str]], pp: int,
 
 
 def plan(cfg: ModelConfig, cost: CostModel, pp: int, vpp: int = 1, hbm_gb: float | None = None,
-         top: int = 5, act_scale: float = 1.0) -> dict:
+         top: int = 5, act_scale: float = 1.0, exclude_standalone_mtp: bool = False) -> dict:
     if vpp != 1:
         raise NotImplementedError("interleaved (VPP > 1) scoring is not implemented yet")
     cands = []
     for stages in L.enumerate_layouts(cfg.num_layers, pp, cfg.mtp_layers, vpp):
         s = score(cfg, cost, stages, pp, hbm_gb, act_scale)
-        if s["fits"]:
+        if s["fits"] and not (exclude_standalone_mtp and s["mtp_standalone"]):
             cands.append(s)
     # Ties are common (one stage sets the pace for many layouts): prefer lower peak
     # memory, then the most even stages (less fill/drain cost if the model is off).
     def key(c):
         t = [f + b for f, b in zip(c["stage_fwd_ms"], c["stage_bwd_ms"])]
         mean = sum(t) / len(t)
-        return (round(c["step_ms"], 1), round(max(c["stage_mem_gb"]), 1),
+        return (round(c["step_ms"], 1), c["critical_stages"], round(max(c["stage_mem_gb"]), 1),
                 sum((x - mean) ** 2 for x in t), c["layout"])
     cands.sort(key=key)
     base = {}

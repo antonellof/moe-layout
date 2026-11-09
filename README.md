@@ -11,6 +11,12 @@ measures what each part of the model really costs, simulates Megatron's pipeline
 schedule for every split Megatron accepts, and prints the layout string with the
 lowest predicted step time, plus the memory each GPU will need.
 
+**Result so far** (4x A100, the handbook's 7B-A1B recipe adapted to 4 pipeline stages
+with one MTP layer): picked from two 20-iteration profiling runs, the planner's layout
+ran **1.54x faster than Megatron's default split** and **1.26x faster than the
+count-based auto layout**. It was within 0.5 percent of the best layout measured, for
+about $6 of GPU time in total. Details and caveats are in [Status](#status).
+
 It also works as a **sizer**: parameters, FLOPs and memory per layer type, from a
 model config or a Megatron command line.
 
@@ -146,18 +152,19 @@ Checked on 2026-11-09. Details and sources are in
 | Stage | What | State |
 | --- | --- | --- |
 | 0 | Planner, cost model, 1F1B simulator, sizer, Megatron log parsers, tests (CPU) | done |
-| A | 4x A100: does MTP with PP train at the pin; default vs count-based; 2 profiling runs | **passed**: see below ($2.50) |
-| B | 4x A100: planner's picks measured, prediction error, best of N (about $8) | next, needs approval |
-| C | 8x H200: handbook scale with expert parallelism (about $13) | optional |
+| A | 4x A100: does MTP with PP train at the pin; default vs count-based; 2 profiling runs | **passed** ($2.50) |
+| B | 4x A100: planner's picks measured, prediction error, best of N | **passed on speed, partial on prediction** ($3.30) |
+| C | 8x H200: handbook scale with expert parallelism (about $13) | optional, needs approval |
 
 KPI (stage B): measured step time of the planner's layout against Megatron's default
 split and the count-based rule. Pass: at least 10 percent faster than count-based,
 within 2 percent of the best measured layout, prediction error at most 5 percent.
 
-### Stage A results (4x A100 80GB, proxy recipe, 20 iterations, median of 6 to 20)
+All runs: 4x A100 80GB (HF Jobs `a100x4`), proxy recipe, 20 iterations, median of
+iterations 6 to 20, Megatron `d6316eb45`, image `nvcr.io/nvidia/pytorch:26.06-py3`.
+Outputs, including every command line, are in [results/](results).
 
-Run tag `stageA-20261109T111955Z`, Megatron `d6316eb45`, image `nvcr.io/nvidia/pytorch:26.06-py3`.
-Outputs in [results/stageA-20261109T111955Z](results/stageA-20261109T111955Z).
+### Stage A: profile and fit (run tag `stageA-20261109T111955Z`)
 
 | Layout | Measured step | Predicted (fit on the 2 profiling runs) | Error |
 | --- | --- | --- | --- |
@@ -168,25 +175,58 @@ Outputs in [results/stageA-20261109T111955Z](results/stageA-20261109T111955Z).
 
 Fitted cost per micro-batch (forward + backward): decoder layer 20.0 ms, loss with
 output layer 79.8 ms (4.0 layers), MTP layer 28.8 ms (1.44 layers), embedding 10.4 ms.
-FLOPs got the direction right but not the size: on A100 at micro-batch 1 the output
-layer is relatively heavier and MTP lighter than its FLOPs suggest. Level-2 timers add
-about 4 percent to step time, so KPI runs never use them.
+Per stage, the fit matches the measured compute time within about 2 ms. FLOPs got the
+direction right but not the size: on A100 at micro-batch 1 the output layer is
+relatively heavier and MTP lighter than its FLOPs suggest. Level-2 timers add about 4
+percent to step time, so KPI runs never use them.
 
-The planner's pick is `Et*5|t*6|t*5|mL`, predicted 4.37 s: 1.47x faster than the
-measured default and 1.20x faster than the measured count-based rule. That is a
-prediction; stage B measures it.
+### Stage B: measure the planner's picks (run tag `stageB-20261109T113743Z`)
 
-What the FLOP-only prior predicts for the PP4 proxy, before any measurement (summary
-of the JSON printed by
+| Layout | Role | Measured step | Predicted | Error |
+| --- | --- | --- | --- | --- |
+| `Et*5\|t*6\|t*5\|mL` | **planner's pick** | **4.26 s** | 4.37 s | +2.7% |
+| `Et*5\|t*5\|t*6\|mL` | planner's #2, fastest measured | 4.23 s | 4.39 s | +3.7% |
+| `Et*6\|t*5\|t*5\|mL` | neighbour | 4.58 s | 4.64 s | +1.3% |
+| `Et*4\|t*6\|t*6\|mL` | planner's #3, two equally slow stages | 4.70 s | 4.39 s | -6.4% |
+| `Et*5\|t*6\|t*5m\|L` | MTP on its own stage | 5.28 s | 4.63 s | -12.3% |
+| default | repeat, same node | 6.54 s | 6.53 s | -0.2% |
+
+| KPI | Target | Result |
+| --- | --- | --- |
+| speedup vs Megatron default (same job, same node) | none | **1.54x** |
+| speedup vs count-based rule | at least 1.10x | **1.26x** (adjusted for the 2 percent slower node; 1.24x raw), pass |
+| gap to the best measured layout | at most 2% | **0.5%**, pass |
+| prediction error | at most 5% | pick 2.7%, mean 4.4%; 2 of 6 layouts miss (6.4%, 12.3%), partial |
+
+What the misses say:
+- **MTP on its own stage ran 12 percent slower than predicted.** Per-stage compute
+  matched in the timed profiling run, so the extra cost is outside the stage compute.
+  Plausible sources are extra communication or synchronization specific to standalone
+  MTP; this is not yet diagnosed. The planner flags these layouts (`mtp_standalone`),
+  and `--exclude-standalone-mtp` skips them.
+- **Two equally slow stages ran 6 percent slower than predicted.** The simulator uses
+  fixed stage times, while real stages jitter, and two critical stages compound the
+  waiting. The planner now reports `critical_stages` and prefers layouts with one
+  bottleneck when predictions tie.
+- **Profiling pays.** The FLOP-only prior would have picked `Et*4|t*6|t*6|mL`, which
+  measured 4.70 s. The fitted pick is 10 percent faster.
+
+Memory: calibrated on all 40 measured stages, the sizer predicts Megatron's "max
+allocated" with 2.8 percent mean error (max 13.7 percent, on the loss-only stage of
+the standalone-MTP layouts).
+
+Spend: stage A $2.50, stage B $3.30.
+
+### Before measuring: the FLOP-only prior
+
+For reference, what the planner predicted from FLOPs alone (summary of the JSON printed by
 `python -m moe_layout plan configs/proxy_a100x4_pp4_mtp1.json --pp 4 --tflops 150 --hbm-gb 80`):
 
 ```
-best              Et*4|t*6|t*6|mL        3.53 s
-megatron_default  Et*4|t*4|t*4|t*4mL     5.38 s   (best predicted 1.52x faster)
-count_based       Et*4|t*5|t*5|t*2mL     4.45 s   (best predicted 1.26x faster)
+best              Et*4|t*6|t*6|mL        3.53 s   (measured 4.70 s)
+megatron_default  Et*4|t*4|t*4|t*4mL     5.38 s   (measured 6.41 s)
+count_based       Et*4|t*5|t*5|t*2mL     4.45 s   (measured 5.25 s)
 ```
-
-These are predictions from FLOPs, not results. Stages A and B measure them.
 
 ## Use
 
