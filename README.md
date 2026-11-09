@@ -19,7 +19,9 @@ lowest predicted step time, plus the memory each GPU will need.
 - on a 4x A100 proxy: 1.54x and 1.26x, within 0.5 percent of the best of 6 measured
   layouts.
 
-About $16 of GPU time in total. Details and caveats are in [Status](#status).
+About $16 of GPU time in total. Details and caveats are in [Status](#status); the full
+write-up (method, setup, all numbers, limitations, how to reproduce) is in
+[docs/REPORT.md](docs/REPORT.md).
 
 It also works as a **sizer**: parameters, FLOPs and memory per layer type, from a
 model config or a Megatron command line.
