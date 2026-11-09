@@ -277,7 +277,10 @@ None of these turns Megatron's own timings into the full `E/t/m/L` string. Detai
 - Diagnose the standalone-MTP gap with a timed run.
 - Model stage jitter.
 - Test multi-node and a DeepSeek-V3-shaped model (61 layers).
-- Offer the planner upstream, as a Megatron-LM or Megatron-Bridge helper.
+- Offer the planner upstream, as a Megatron-LM or Megatron-Bridge helper: proposed in
+  [NVIDIA/Megatron-LM#9197](https://github.com/NVIDIA/Megatron-LM/issues/9197). A related
+  validator question (MTP on pipeline rank 0 is accepted despite the stated restriction) is
+  [NVIDIA/Megatron-LM#9196](https://github.com/NVIDIA/Megatron-LM/issues/9196).
 
 ## Lineage
 

@@ -21,7 +21,9 @@ lowest predicted step time, plus the memory each GPU will need.
 
 About $16 of GPU time in total. Details and caveats are in [Status](#status); the full
 write-up (method, setup, all numbers, limitations, how to reproduce) is in
-[docs/REPORT.md](docs/REPORT.md).
+[docs/REPORT.md](docs/REPORT.md). Blog post:
+[One Stage Sets the Pace](https://www.fratepietro.com/2026/moe-layout-megatron-pipeline-planner-mtp/).
+Proposed upstream in [NVIDIA/Megatron-LM#9197](https://github.com/NVIDIA/Megatron-LM/issues/9197).
 
 It also works as a **sizer**: parameters, FLOPs and memory per layer type, from a
 model config or a Megatron command line.
