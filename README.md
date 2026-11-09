@@ -146,13 +146,35 @@ Checked on 2026-11-09. Details and sources are in
 | Stage | What | State |
 | --- | --- | --- |
 | 0 | Planner, cost model, 1F1B simulator, sizer, Megatron log parsers, tests (CPU) | done |
-| A | 4x A100: does MTP with PP train at the pin; default vs count-based; 2 profiling runs (about $8) | running |
-| B | 4x A100: planner's picks measured, prediction error, best of N (about $8) | after A |
+| A | 4x A100: does MTP with PP train at the pin; default vs count-based; 2 profiling runs | **passed**: see below ($2.50) |
+| B | 4x A100: planner's picks measured, prediction error, best of N (about $8) | next, needs approval |
 | C | 8x H200: handbook scale with expert parallelism (about $13) | optional |
 
 KPI (stage B): measured step time of the planner's layout against Megatron's default
 split and the count-based rule. Pass: at least 10 percent faster than count-based,
 within 2 percent of the best measured layout, prediction error at most 5 percent.
+
+### Stage A results (4x A100 80GB, proxy recipe, 20 iterations, median of 6 to 20)
+
+Run tag `stageA-20261109T111955Z`, Megatron `d6316eb45`, image `nvcr.io/nvidia/pytorch:26.06-py3`.
+Outputs in [results/stageA-20261109T111955Z](results/stageA-20261109T111955Z).
+
+| Layout | Measured step | Predicted (fit on the 2 profiling runs) | Error |
+| --- | --- | --- | --- |
+| Megatron default `Et*4\|t*4\|t*4\|t*4mL` | 6.41 s | 6.53 s | +1.7% |
+| count-based `Et*4\|t*5\|t*5\|t*2mL` (not used in the fit) | 5.25 s | 5.29 s | +0.6% |
+| profiling 1, same as default, with timers | 6.55 s | 6.53 s | -0.3% |
+| profiling 2 `Et*7\|t*5\|t*4m\|L`, with timers | 5.32 s | 5.20 s | -2.2% |
+
+Fitted cost per micro-batch (forward + backward): decoder layer 20.0 ms, loss with
+output layer 79.8 ms (4.0 layers), MTP layer 28.8 ms (1.44 layers), embedding 10.4 ms.
+FLOPs got the direction right but not the size: on A100 at micro-batch 1 the output
+layer is relatively heavier and MTP lighter than its FLOPs suggest. Level-2 timers add
+about 4 percent to step time, so KPI runs never use them.
+
+The planner's pick is `Et*5|t*6|t*5|mL`, predicted 4.37 s: 1.47x faster than the
+measured default and 1.20x faster than the measured count-based rule. That is a
+prediction; stage B measures it.
 
 What the FLOP-only prior predicts for the PP4 proxy, before any measurement (summary
 of the JSON printed by

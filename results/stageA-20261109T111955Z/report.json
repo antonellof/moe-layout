@@ -1,0 +1,118 @@
+{
+  "runs": [
+    {
+      "run": "01_default",
+      "layout": "default",
+      "profiling": false,
+      "failed": false,
+      "wall_s": 231,
+      "iters_measured": 15,
+      "step_ms_median": 6414.5,
+      "lm_loss_last": 8.19558,
+      "max_alloc_gb": {
+        "1": 15.2387890625,
+        "0": 20.92859375,
+        "3": 34.223720703125,
+        "2": 15.1762890625
+      },
+      "predicted_step_ms": 6526.539678026917,
+      "predicted_mem_gb": [
+        24.9817856,
+        20.186647552,
+        20.119538688,
+        37.148730624
+      ],
+      "prediction_error": 0.017466626865214215
+    },
+    {
+      "run": "02_Etx4-tx5-tx5-tx2mL",
+      "layout": "Et*4|t*5|t*5|t*2mL",
+      "profiling": false,
+      "failed": false,
+      "wall_s": 157,
+      "iters_measured": 15,
+      "step_ms_median": 5254.5,
+      "lm_loss_last": 8.205943,
+      "max_alloc_gb": {
+        "2": 18.7583984375,
+        "3": 27.12201171875,
+        "0": 20.92859375,
+        "1": 18.8365234375
+      },
+      "predicted_step_ms": 5284.638424655282,
+      "predicted_mem_gb": [
+        24.9817856,
+        24.031982848,
+        23.948096768,
+        29.525168896
+      ],
+      "prediction_error": 0.00573573597017444
+    },
+    {
+      "run": "03_Etx4-tx4-tx4-tx4mL_prof",
+      "layout": "Et*4|t*4|t*4|t*4mL",
+      "profiling": true,
+      "failed": false,
+      "wall_s": 182,
+      "iters_measured": 15,
+      "step_ms_median": 6548.6,
+      "lm_loss_last": 8.206802,
+      "max_alloc_gb": {
+        "1": 15.2387890625,
+        "2": 15.1762890625,
+        "0": 18.7269140625,
+        "3": 34.223720703125
+      },
+      "predicted_step_ms": 6526.539678026917,
+      "predicted_mem_gb": [
+        24.9817856,
+        20.186647552,
+        20.119538688,
+        37.148730624
+      ],
+      "prediction_error": -0.003368708116709491
+    },
+    {
+      "run": "04_Etx7-tx5-tx4m-L_prof",
+      "layout": "Et*7|t*5|t*4m|L",
+      "profiling": true,
+      "failed": false,
+      "wall_s": 175,
+      "iters_measured": 15,
+      "step_ms_median": 5317.0,
+      "lm_loss_last": 8.232035,
+      "max_alloc_gb": {
+        "2": 23.427626953125,
+        "0": 31.62802734375,
+        "3": 11.900849609375,
+        "1": 18.8365234375
+      },
+      "predicted_step_ms": 5201.255492382725,
+      "predicted_mem_gb": [
+        36.568123136,
+        24.031982848,
+        28.301858048,
+        12.930758656
+      ],
+      "prediction_error": -0.021768762011900564
+    }
+  ],
+  "kpi_ranking": [
+    [
+      "Et*4|t*5|t*5|t*2mL",
+      5254.5
+    ],
+    [
+      "default",
+      6414.5
+    ]
+  ],
+  "best_measured": {
+    "layout": "Et*4|t*5|t*5|t*2mL",
+    "step_ms": 5254.5
+  },
+  "best_vs_default_speedup": 1.2207631553906175,
+  "best_vs_count_based_speedup": 1.0,
+  "prediction_abs_error_mean": 0.011601181417694327,
+  "prediction_abs_error_max": 0.017466626865214215
+}
