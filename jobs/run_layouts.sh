@@ -96,43 +96,88 @@ MEGATRON_COMMIT=$(git -C "$MEGATRON_PATH" rev-parse HEAD 2>/dev/null || echo unk
 GPUS=$(nvidia-smi -L 2>/dev/null | tr '\n' ';' || echo unknown)
 
 # ------------------------------------------------------------------ layouts
-IFS=';' read -r -a ENTRIES <<< "$LAYOUTS"
-idx=0; prof_args=()
-for entry in "${ENTRIES[@]}"; do
-  idx=$((idx + 1)); entry=$(echo "$entry" | xargs)
-  [[ -n "$entry" ]] || continue
-  lay=${entry%+prof}; prof=0; [[ "$entry" == *+prof ]] && prof=1
-  name=$(printf '%02d_%s%s' "$idx" "$(echo "$lay" | tr '|*' '-x')" "$([[ $prof == 1 ]] && echo _prof)")
-  RUN_DIR="$RUN_ROOT/$name"; mkdir -p "$RUN_DIR"
-  [[ -f "$RUN_DIR/done" ]] && { echo "skip $name"; continue; }
-  EXTRA=()
+# Entries run in order. A "plan:N" entry is deferred: after the profiling runs are
+# fitted, the planner's top N layouts are measured (closed loop in one job).
+RANKS_PER_STAGE=${RANKS_PER_STAGE:-$(( NPROC / PP ))}   # ranks pp*k .. pp*k+k-1 form stage pp
+PLAN_ARGS=${PLAN_ARGS:---exclude-standalone-mtp}
+idx=0; prof_args=(); plan_n=0
+
+run_layout() {  # $1 layout ("default" or a layout string), $2 prof (0/1), $3 name suffix
+  local lay=$1 prof=$2 suffix=${3:-}
+  idx=$((idx + 1))
+  local name
+  name=$(printf '%02d_%s%s%s' "$idx" "$(echo "$lay" | tr '|*' '-x')" "$([[ $prof == 1 ]] && echo _prof)" "$suffix")
+  local RUN_DIR="$RUN_ROOT/$name"; mkdir -p "$RUN_DIR"
+  [[ -f "$RUN_DIR/done" ]] && { echo "skip $name"; return 0; }
+  local EXTRA=()
   [[ "$lay" != default ]] && EXTRA+=(--pipeline-model-parallel-layout "$lay")
   [[ $prof == 1 ]] && EXTRA+=(--timing-log-level 2 --timing-log-option all)
-  CMD=(python -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node="$NPROC"
+  local CMD=(python -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node="$NPROC"
        "$MEGATRON_PATH/pretrain_gpt.py"
        "${PAR[@]}" "${MODEL[@]}" "${MTPF[@]}" "${DATA[@]}" "${OPT[@]}" "${MOE[@]}" "${LOG[@]}" "${EXTRA[@]}")
   echo "=== $name ($RUN_TAG) layout=$lay prof=$prof ==="
-  s0=$(date +%s)
+  local s0; s0=$(date +%s)
   "${CMD[@]}" 2>&1 | tee "$RUN_DIR/train.log" || echo "layout $name FAILED" | tee "$RUN_DIR/failed"
   python - "$RUN_DIR/meta.json" "$lay" "$prof" "$RUN_TAG" "$IMAGE" "$MEGATRON_COMMIT" "$GPUS" \
-    "$(( $(date +%s) - s0 ))" "${CMD[@]}" <<'PY'
+    "$(( $(date +%s) - s0 ))" "$suffix" "${CMD[@]}" <<'PY'
 import json, sys
-out, lay, prof, tag, image, commit, gpus, wall, *cmd = sys.argv[1:]
+out, lay, prof, tag, image, commit, gpus, wall, suffix, *cmd = sys.argv[1:]
 json.dump({"layout": lay, "profiling": prof == "1", "run_tag": tag, "image": image,
-           "megatron_commit": commit, "gpus": gpus, "wall_s": int(wall), "cmd": cmd},
-          open(out, "w"), indent=2)
+           "megatron_commit": commit, "gpus": gpus, "wall_s": int(wall),
+           "source": suffix.lstrip("_") or "listed", "cmd": cmd}, open(out, "w"), indent=2)
 PY
   touch "$RUN_DIR/done"
-  [[ $prof == 1 && ! -f "$RUN_DIR/failed" ]] && prof_args+=(--run "$lay=$RUN_DIR/train.log")
+  if [[ $prof == 1 && ! -f "$RUN_DIR/failed" ]]; then prof_args+=(--run "$lay=$RUN_DIR/train.log"); fi
   python -m moe_layout.report "$RUN_ROOT" --warmup "$WARMUP" > "$RUN_ROOT/summary.json" || true
   upload_runs "runs $RUN_TAG: $name done"
-done
+}
 
-# ------------------------------------------------------------------ fit + plan from profiling runs
-if (( ${#prof_args[@]} >= 2 )); then
-  python -m moe_layout fit "$CONFIG" "${prof_args[@]}" --warmup "$WARMUP" -o "$RUN_ROOT/costs.json" \
-    > "$RUN_ROOT/fit.json" || true
-  [[ -f "$RUN_ROOT/costs.json" ]] && python -m moe_layout plan "$CONFIG" --pp "$PP" \
-    --costs "$RUN_ROOT/costs.json" --hbm-gb "${HBM_GB:-76}" --top 8 > "$RUN_ROOT/plan.json" || true
+fit_and_plan() {  # fit the profiling runs so far, write costs.json and plan.json
+  (( ${#prof_args[@]} >= 2 )) || { echo "fit skipped: need 2 profiling runs" >&2; return 0; }
+  python -m moe_layout fit "$CONFIG" "${prof_args[@]}" --warmup "$WARMUP" \
+    --ranks-per-stage "$RANKS_PER_STAGE" -o "$RUN_ROOT/costs.json" > "$RUN_ROOT/fit.json" || return 0
+  # shellcheck disable=SC2086
+  python -m moe_layout plan "$CONFIG" --pp "$PP" --costs "$RUN_ROOT/costs.json" \
+    --hbm-gb "${HBM_GB:-76}" --top 8 $PLAN_ARGS > "$RUN_ROOT/plan.json" || true
+  upload_runs "runs $RUN_TAG: fit and plan"
+}
+
+baseline_args=()   # timer-free listed runs, used to recalibrate the overhead at the end
+IFS=';' read -r -a ENTRIES <<< "$LAYOUTS"
+for entry in "${ENTRIES[@]}"; do
+  entry=$(echo "$entry" | xargs)
+  [[ -n "$entry" ]] || continue
+  if [[ "$entry" == plan:* ]]; then
+    # closed loop, in place: fit what has been profiled so far, then measure the top N
+    fit_and_plan
+    if [[ -s "$RUN_ROOT/plan.json" ]]; then
+      mapfile -t PICKS < <(python -c 'import json, sys
+top = json.load(open(sys.argv[1]))["top"][: int(sys.argv[2])]
+print("\n".join(c["layout"] for c in top))' "$RUN_ROOT/plan.json" "${entry#plan:}")
+      for k in "${!PICKS[@]}"; do run_layout "${PICKS[$k]}" 0 "_plan$((k + 1))"; done
+    fi
+    continue
+  fi
+  lay=${entry%+prof}; prof=0; [[ "$entry" == *+prof ]] && prof=1
+  run_layout "$lay" "$prof"
+  if [[ $prof == 0 ]]; then
+    last=$(ls -d "$RUN_ROOT"/[0-9][0-9]_* | tail -1)
+    [[ -f "$last/failed" ]] || baseline_args+=(--run "$lay=$last/train.log")
+  fi
+done
+[[ -f "$RUN_ROOT/costs.json" ]] || fit_and_plan
+
+# ------------------------------------------------------------------ report
+# Overhead recalibrated on the timer-free listed baselines only, so the planner's picks
+# stay out-of-sample; predictions in summary.json use costs_calibrated.json.
+REPORT=(python -m moe_layout.report "$RUN_ROOT" --warmup "$WARMUP")
+if [[ -f "$RUN_ROOT/costs.json" ]]; then
+  costs_for_report="$RUN_ROOT/costs.json"
+  if (( ${#baseline_args[@]} >= 2 )); then
+    python -m moe_layout calibrate "$CONFIG" --pp "$PP" --costs "$RUN_ROOT/costs.json" \
+      "${baseline_args[@]}" --warmup "$WARMUP" -o "$RUN_ROOT/costs_calibrated.json" \
+      > "$RUN_ROOT/calibrate.json" && costs_for_report="$RUN_ROOT/costs_calibrated.json"
+  fi
+  REPORT+=(--config "$CONFIG" --costs "$costs_for_report" --pp "$PP")
 fi
-python -m moe_layout.report "$RUN_ROOT" --warmup "$WARMUP" | tee "$RUN_ROOT/summary.json"
+"${REPORT[@]}" | tee "$RUN_ROOT/summary.json"

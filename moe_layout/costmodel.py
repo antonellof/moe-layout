@@ -153,6 +153,30 @@ def fit(cfg: ModelConfig, runs: list[dict], prior_weight: float = 0.05, p2p_ms: 
     return model
 
 
+def calibrate_overhead(cfg: ModelConfig, cost: CostModel, timer_free: list[tuple[list[list[str]], float]]) -> CostModel:
+    """Re-estimate the per-step overhead from timer-free runs: overhead = measured step
+    minus the simulated forward-backward makespan. Level-2 timers inflate the overhead
+    measured on profiling runs by a few percent; KPI predictions should use this one.
+    `timer_free` is a list of (stages, measured step ms); use baseline runs only, so
+    the planner's own picks stay out-of-sample."""
+    from .simulate import one_f_one_b  # local import: simulate does not depend on costmodel
+    over, maxp = [], []
+    mb = cfg.global_batch // (cfg.micro_batch * cfg.dp)
+    for stages, step in timer_free:
+        fwd, bwd = zip(*(cost.stage_ms(st) for st in stages))
+        sim = one_f_one_b(list(fwd), list(bwd), mb, cost.p2p_ms)
+        first = [sum(s.count("t") for s in stages[:i]) for i in range(len(stages))]
+        params = [cfg.stage_params(st, f) for st, f in zip(stages, first)]
+        over.append(step - sim["makespan_ms"] - cost.opt_ms_per_param * (max(params) - cost.overhead_ref_params))
+        maxp.append(max(params))
+    if over:
+        cost.fit_report = dict(cost.fit_report, overhead_ms_profiling=cost.overhead_ms,
+                               overhead_ms_timer_free=statistics.mean(over), overhead_runs=len(over))
+        cost.overhead_ms = statistics.mean(over)
+        cost.source = cost.source + "+timer-free-overhead"
+    return cost
+
+
 def run_from_log(cfg: ModelConfig, stages: list[list[str]], summary: dict, microbatches: int,
                  ranks_per_stage: int = 1) -> dict:
     """Turn timings.summarize() output into a fit() run (stage s = ranks s*k .. s*k+k-1)."""

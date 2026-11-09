@@ -6,6 +6,7 @@
   python -m moe_layout fit CONFIG --run "LAYOUT=train.log" [--run ...] -o costs.json
   python -m moe_layout plan CONFIG --pp N (--costs costs.json | --tflops 150) [--hbm-gb 80]
   python -m moe_layout score CONFIG --pp N --costs costs.json --layout STR [--measured-ms X]
+  python -m moe_layout calibrate CONFIG --pp N --costs costs.json --run "LAYOUT=train.log" -o out.json
 
 CONFIG is a JSON ModelConfig (see configs/) or a file holding a Megatron command line
 (--from-args).
@@ -17,7 +18,7 @@ import json
 import sys
 
 from . import layout as L
-from .costmodel import CostModel, fit, run_from_log
+from .costmodel import CostModel, calibrate_overhead, fit, run_from_log
 from .plan import plan, profiling_layouts, score
 from .sizer import ModelConfig, from_json, from_megatron_args
 from .timings import parse_log, summarize
@@ -67,6 +68,11 @@ def main(argv=None):
     pl.add_argument("--top", type=int, default=5)
     pl.add_argument("--exclude-standalone-mtp", action="store_true",
                     help="skip layouts with MTP on a stage without the loss (under-predicted in stage B)")
+    ca = common(sub.add_parser("calibrate", help="re-estimate overhead from timer-free runs"))
+    ca.add_argument("--costs", required=True)
+    ca.add_argument("--run", action="append", required=True, help="LAYOUT=path/to/train.log (timer-free)")
+    ca.add_argument("--warmup", type=int, default=5)
+    ca.add_argument("-o", "--out", required=True)
     sc = common(sub.add_parser("score", help="predict one layout"))
     sc.add_argument("--costs")
     sc.add_argument("--tflops", type=float)
@@ -107,6 +113,17 @@ def main(argv=None):
         model = fit(cfg, runs, p2p_ms=a.p2p_ms)
         open(a.out, "w").write(model.to_json())
         out = {"written": a.out, "fwd": model.fwd, "bwd": model.bwd, "report": model.fit_report}
+    elif a.cmd == "calibrate":
+        cost = CostModel.from_json(a.costs)
+        tf = []
+        for spec in a.run:
+            lay, path = spec.split("=", 1)
+            st = (L.megatron_default(cfg.num_layers, a.pp, cfg.mtp_layers) if lay == "default"
+                  else L.parse(lay))
+            tf.append((st, summarize(parse_log(path), warmup=a.warmup)["step_ms_median"]))
+        cost = calibrate_overhead(cfg, cost, tf)
+        open(a.out, "w").write(cost.to_json())
+        out = {"written": a.out, "overhead_ms": cost.overhead_ms, "report": cost.fit_report}
     elif a.cmd == "plan":
         out = plan(cfg, _cost(a, cfg), a.pp, hbm_gb=a.hbm_gb, top=a.top,
                    exclude_standalone_mtp=a.exclude_standalone_mtp)
